@@ -360,7 +360,7 @@ func podProblem(p *corev1.Pod) (string, bool) {
 		return reason, true
 	case corev1.PodPending:
 		if time.Since(p.CreationTimestamp.Time) > pendingGrace {
-			return "Pending for " + time.Since(p.CreationTimestamp.Time).Round(time.Minute).String(), true
+			return "Pending for " + minutes(time.Since(p.CreationTimestamp.Time)), true
 		}
 	}
 	return "", false
@@ -692,4 +692,19 @@ func timePtr(t time.Time) *time.Time {
 	}
 	u := t.UTC()
 	return &u
+}
+
+// minutes formats a duration to the minute without Go's trailing zero units:
+// "11m" and "1h5m" rather than "11m0s" and "1h5m0s".
+func minutes(d time.Duration) string {
+	d = d.Round(time.Minute)
+	if d == 0 {
+		return "0m"
+	}
+	s := d.String()
+	s = strings.TrimSuffix(s, "0s")
+	if strings.HasSuffix(s, "h0m") {
+		s = strings.TrimSuffix(s, "0m")
+	}
+	return s
 }

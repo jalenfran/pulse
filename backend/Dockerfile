@@ -1,7 +1,7 @@
 # Build on the node and load straight into k3s (no registry):
 #
-#   docker build -t pulse:0.2.1 backend/
-#   docker save pulse:0.2.1 | sudo k3s ctr images import -
+#   docker build -t pulse:0.2.2 backend/
+#   docker save pulse:0.2.2 | sudo k3s ctr images import -
 #
 # Building on the Mac (arm64) needs --platform linux/amd64.
 

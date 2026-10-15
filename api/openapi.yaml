@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Pulse
-  version: 0.2.1
+  version: 0.2.2
   description: |
     Private status API for the homelab. Reachable only from the LAN and the
     tailnet, and every /v1 call needs a bearer token.
@@ -533,7 +533,7 @@ components:
         id: { type: string, description: "ULID built from ts: the sort order and the pagination cursor. Mirrored events get a new one when they recur; old ids still resolve through GET /v1/events/{id}." }
         ts: { type: string, format: date-time }
         source: { type: string, description: '"k8s" or "host:<name>".' }
-        kind: { type: string, description: 'e.g. nixos-upgrade, node-health, boot, ssh-login, k8s-event, pod-crashloop, node-notready.' }
+        kind: { type: string, description: 'Host kinds: nixos-upgrade, node-health, boot, ssh-login (anything a host posts). Kubernetes kinds: node-notready, node-down, node-ready, pod-crashloop, job-failed, workload-unhealthy, workload-recovered, k8s-event.' }
         severity: { $ref: "#/components/schemas/Severity" }
         title: { type: string }
         body: { type: string }

@@ -106,6 +106,12 @@ func (c *Cluster) Start(ctx context.Context) error {
 	}); err != nil {
 		return err
 	}
+	if _, err := c.factory.Batch().V1().Jobs().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc:    c.onJob,
+		UpdateFunc: func(_, obj any) { c.onJob(obj) },
+	}); err != nil {
+		return err
+	}
 	if _, err := c.evFactory.Core().V1().Events().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    func(obj any) { c.onK8sEvent(obj) },
 		UpdateFunc: func(_, obj any) { c.onK8sEvent(obj) },
@@ -126,6 +132,8 @@ func (c *Cluster) Start(ctx context.Context) error {
 		}
 	}
 	c.synced.Store(true)
+	// Only after the sync: before it, every workload would look absent.
+	go c.watchWorkloads(ctx)
 	return nil
 }
 

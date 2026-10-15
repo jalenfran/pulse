@@ -92,7 +92,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: pulse
-          image: pulse:0.2.1
+          image: pulse:0.2.2
           imagePullPolicy: IfNotPresent
           args: [serve]
           ports:

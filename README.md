@@ -36,7 +36,7 @@ If you change an endpoint, update `api/openapi.yaml` in the same commit.
 | `PULSE_NTFY_TOPIC` | `pulse` | ntfy topic |
 | `PULSE_NTFY_TOKEN` | (unset) | ntfy access token with write access to the topic |
 | `PULSE_NOTIFY_MIN_SEVERITY` | `warning` | lowest severity that notifies |
-| `PULSE_NOTIFY_ALWAYS` | `nixos-upgrade,node-ready` | kinds that notify at any severity |
+| `PULSE_NOTIFY_ALWAYS` | `nixos-upgrade,node-ready,workload-recovered` | kinds that notify at any severity |
 | `PULSE_NOTIFY_IGNORE` | `k8s-event` | kinds that never notify (raw Kubernetes warnings are noisy; crashloops and node outages have their own kinds) |
 | `PULSE_NOTIFY_COOLDOWN` | `6h` | at most one notification per event key in this window |
 | `PULSE_QUIET_HOURS` | `23-8` | local hours when only `critical` goes out; the rest arrives as one digest afterwards. `off` disables |
@@ -51,9 +51,20 @@ in the ntfy app. With a self-hosted server on iOS, set
 Only a hash of the message ID goes to ntfy.sh, and the app fetches the
 content from your server.
 
-A node going NotReady is a `warning`. It only becomes `critical` (paging
-through quiet hours) if the node is still down 5 minutes later, so routine
-reboots don't wake anyone.
+What Pulse itself raises from the cluster:
+
+| Kind | When | Severity |
+|---|---|---|
+| `node-notready` | a node goes NotReady | warning |
+| `node-down` | still NotReady 5 minutes later | critical |
+| `node-ready` | it's back | info (notifies by default) |
+| `pod-crashloop` | a container enters CrashLoopBackOff | warning |
+| `job-failed` | a Job fails (named after its CronJob, so a nightly backup has one cooldown) | warning |
+| `workload-unhealthy` | a Deployment/StatefulSet/DaemonSet has been short of ready replicas for 10 minutes, and it isn't a crashloop. The body says why: image pull, unschedulable, readiness | warning |
+| `workload-recovered` | a workload reported unhealthy is healthy again | info (notifies by default) |
+
+Only `node-down` is critical, so routine reboots don't wake anyone. The grace
+periods (5 and 10 minutes) cover a node rebooting and a rollout.
 
 ```sh
 kubectl -n pulse exec deploy/pulse -- /pulse notify test
@@ -102,8 +113,8 @@ patches:
 Without a registry, build on the node and import the image into k3s directly:
 
 ```sh
-docker build -t pulse:0.2.1 backend/
-docker save pulse:0.2.1 | sudo k3s ctr images import -
+docker build -t pulse:0.2.2 backend/
+docker save pulse:0.2.2 | sudo k3s ctr images import -
 kubectl apply -k my-cluster/pulse
 ```
 

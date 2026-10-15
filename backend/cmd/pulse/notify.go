@@ -20,7 +20,7 @@ import (
 //	PULSE_NTFY_TOPIC            topic (default "pulse")
 //	PULSE_NTFY_TOKEN            ntfy access token with write access to the topic
 //	PULSE_NOTIFY_MIN_SEVERITY   info | warning | critical (default warning)
-//	PULSE_NOTIFY_ALWAYS         kinds that notify at any severity (default nixos-upgrade,node-ready)
+//	PULSE_NOTIFY_ALWAYS         kinds that notify at any severity (default nixos-upgrade,node-ready,workload-recovered)
 //	PULSE_NOTIFY_IGNORE         kinds that never notify (default k8s-event)
 //	PULSE_NOTIFY_COOLDOWN       per-key cooldown (default 6h)
 //	PULSE_QUIET_HOURS           local hours "23-8"; "off" disables (default 23-8)
@@ -45,7 +45,7 @@ func notifierFromEnv(st *store.Store, log *slog.Logger) (*notify.Notifier, error
 		return nil, nil
 	}
 	rules := notify.Rules{
-		Always: set(env("PULSE_NOTIFY_ALWAYS", "nixos-upgrade,node-ready")),
+		Always: set(env("PULSE_NOTIFY_ALWAYS", "nixos-upgrade,node-ready,workload-recovered")),
 		Ignore: set(env("PULSE_NOTIFY_IGNORE", "k8s-event")),
 		MaxAge: time.Hour,
 	}

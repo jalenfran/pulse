@@ -33,7 +33,7 @@ the hosts.
 
 | Source | How | What |
 |---|---|---|
-| Kubernetes | pull + watch (in-cluster SA) | nodes (Ready, pressure, version), workloads (ready/desired), pods (restarts, CrashLoopBackOff), Warning events, pod logs, metrics-server CPU/mem |
+| Kubernetes | pull + watch (in-cluster SA) | nodes (Ready, pressure, version), workloads (ready/desired), pods (restarts, CrashLoopBackOff), failed Jobs, Warning events, pod logs, metrics-server CPU/mem. Pulse raises its own events from these: node down/back, crashloops, failed Jobs, workloads short of ready replicas for 10 minutes |
 | Hosts | push: `curl POST /v1/ingest` from systemd | OS upgrade results, health-check pass/fail, boots (kernel, reason), accepted SSH logins |
 | Probes | pull, from the pod (phase 3) | public endpoints up, cert days remaining over the network |
 
