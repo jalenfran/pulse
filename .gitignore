@@ -4,3 +4,9 @@
 *.db-wal
 # go build output
 /backend/pulse
+# Swift / Xcode
+.build/
+.swiftpm/
+xcuserdata/
+DerivedData/
+ios/Signing.local.xcconfig

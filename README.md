@@ -134,6 +134,29 @@ re-minted.
 
 ## iOS development
 
-Work in `ios/`. Generate the API client from `../api/openapi.yaml` with
-[swift-openapi-generator](https://github.com/apple/swift-openapi-generator).
-The Mac must be on the tailnet to reach the API.
+Open `ios/Pulse.xcodeproj` (Xcode 26+, iOS 26+). The first build asks you to
+trust the OpenAPI generator plugin. The Mac must be on the LAN or tailnet to
+reach the API.
+
+```
+ios/Pulse/      SwiftUI app: Overview, Nodes, Workloads, Events, pod logs
+ios/PulseKit/   Swift package: client generated from api/openapi.yaml
+                (symlinked in), Keychain, enrollment links, log parsing
+```
+
+The client is regenerated on every build, so an endpoint change in
+`api/openapi.yaml` shows up as a compile error in the app, not a runtime one.
+PulseKit's tests run on the Mac:
+
+```sh
+cd ios/PulseKit && swift test
+```
+
+Debug builds read two environment variables, which make simulator runs
+scriptable without tapping through enrollment:
+
+```sh
+SIMCTL_CHILD_PULSE_ENROLL='pulse://enroll?url=…&token=…' \
+SIMCTL_CHILD_PULSE_TAB=nodes \
+  xcrun simctl launch booted dev.homelab.pulse
+```

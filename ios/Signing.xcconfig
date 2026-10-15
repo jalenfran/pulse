@@ -1,0 +1,12 @@
+// Per-developer signing. Put your own values in Signing.local.xcconfig
+// (gitignored) so they stay out of the public repo, e.g.
+//
+//   DEVELOPMENT_TEAM = ABCDE12345
+//   PRODUCT_BUNDLE_IDENTIFIER = com.example.pulse
+//
+// If you pick a team in Xcode's Signing & Capabilities tab instead, Xcode
+// writes it into project.pbxproj: move it here before committing.
+
+PRODUCT_BUNDLE_IDENTIFIER = dev.homelab.pulse
+
+#include? "Signing.local.xcconfig"
