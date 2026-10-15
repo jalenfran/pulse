@@ -55,6 +55,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v1/pods/{namespace}/{pod}/logs", user(s.podLogs))
 	mux.Handle("GET /v1/pods/{namespace}/{pod}/logs/stream", user(s.streamPodLogs))
 	mux.Handle("GET /v1/events", user(s.listEvents))
+	mux.Handle("GET /v1/events/{id}", user(s.getEvent))
 	mux.Handle("POST /v1/ingest", s.requireToken("host")(s.ingest))
 
 	return s.logRequests(mux)
@@ -506,6 +507,27 @@ func (s *Server) listEvents(w http.ResponseWriter, r *http.Request) {
 		resp.NextCursor = items[limit-1].ID
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// ulidPattern matches a ULID (Crockford base32, 26 characters).
+var ulidPattern = regexp.MustCompile(`^[0-9A-HJKMNP-TV-Z]{26}$`)
+
+func (s *Server) getEvent(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !ulidPattern.MatchString(id) {
+		writeError(w, http.StatusNotFound, "no such event")
+		return
+	}
+	e, err := s.store.GetEvent(r.Context(), id)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "no such event")
+		return
+	}
+	if err != nil {
+		s.internalError(w, "event", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, e)
 }
 
 var eventKind = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,39}$`)

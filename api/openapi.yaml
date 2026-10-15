@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Pulse
-  version: 0.1.0
+  version: 0.2.1
   description: |
     Private status API for the homelab. Reachable only from the LAN and the
     tailnet, and every /v1 call needs a bearer token.
@@ -11,6 +11,17 @@ info:
     call only /v1/ingest.
 
     CPU values are millicores and memory values are bytes.
+
+    ## Deep links
+
+    The app registers the `pulse://` URL scheme. The server produces these
+    links and the app handles them:
+
+    | Link | Where | Opens |
+    |---|---|---|
+    | `pulse://enroll?url=<base URL>&token=<user token>` | QR from `pulse token create` | enrollment |
+    | `pulse://events/<id>` | ntfy click action on a single-event notification | that event (`GET /v1/events/{id}`) |
+    | `pulse://events` | ntfy click action on a quiet-hours digest | the timeline |
 servers:
   - url: https://pulse.example.com
     description: Your deployment. The app takes the real URL from the enrollment QR.
@@ -238,6 +249,27 @@ paths:
                     description: Absent on the last page.
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /v1/events/{id}:
+    get:
+      operationId: getEvent
+      summary: One event, e.g. the one a notification links to.
+      description: |
+        Events mirrored from Kubernetes (a crashlooping pod, a repeating
+        Warning) get a new id each time they recur, which moves them back to
+        the top of the timeline. An id from an earlier notification still
+        resolves: the response is the current version of that event, so its
+        `id` can differ from the one requested.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Event" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   /v1/ingest:
     post:
@@ -498,7 +530,7 @@ components:
       type: object
       required: [id, ts, source, kind, severity, title, key]
       properties:
-        id: { type: string, description: ULID. Also the pagination cursor. }
+        id: { type: string, description: "ULID built from ts: the sort order and the pagination cursor. Mirrored events get a new one when they recur; old ids still resolve through GET /v1/events/{id}." }
         ts: { type: string, format: date-time }
         source: { type: string, description: '"k8s" or "host:<name>".' }
         kind: { type: string, description: 'e.g. nixos-upgrade, node-health, boot, ssh-login, k8s-event, pod-crashloop, node-notready.' }

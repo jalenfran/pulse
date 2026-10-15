@@ -35,13 +35,17 @@ func (s *Ntfy) Send(ctx context.Context, m Message) error {
 		body = body[:cut] + "…"
 	}
 	// JSON publishing, rather than headers, so titles needn't be ASCII.
-	payload, err := json.Marshal(map[string]any{
+	fields := map[string]any{
 		"topic":    s.Topic,
 		"title":    m.Title,
 		"message":  body,
 		"priority": priority(m.Severity),
 		"tags":     tags(m),
-	})
+	}
+	if m.Click != "" {
+		fields["click"] = m.Click // ntfy's click action: opened on tap
+	}
+	payload, err := json.Marshal(fields)
 	if err != nil {
 		return err
 	}

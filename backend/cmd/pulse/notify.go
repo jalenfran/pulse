@@ -102,7 +102,7 @@ func notifyCmd(args []string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	if err := sender.Send(ctx, notify.Message{Title: "Pulse test", Body: msg, Severity: "info", Kind: "test"}); err != nil {
+	if err := sender.Send(ctx, notify.Message{Title: "Pulse test", Body: msg, Severity: "info", Kind: "test", Click: "pulse://events"}); err != nil {
 		return err
 	}
 	fmt.Printf("Sent to %s/%s.\n", strings.TrimRight(sender.URL, "/"), sender.Topic)

@@ -80,6 +80,11 @@ func TestDaytimeRules(t *testing.T) {
 	if rec.sent[0].Kind != "pod-crashloop" || rec.sent[1].Kind != "nixos-upgrade" {
 		t.Errorf("unexpected messages: %+v", rec.sent)
 	}
+	for _, m := range rec.sent {
+		if !strings.HasPrefix(m.Click, "pulse://events/") || len(m.Click) != len("pulse://events/")+26 {
+			t.Errorf("click = %q, want pulse://events/<ulid>", m.Click)
+		}
+	}
 
 	// After the cooldown the same key notifies again.
 	later := noon.Add(7 * time.Hour)
@@ -113,6 +118,9 @@ func TestQuietHoursDeferThenDigest(t *testing.T) {
 	d := rec.sent[1]
 	if d.Kind != "digest" || d.Severity != "warning" || !strings.Contains(d.Title, "2 events") {
 		t.Errorf("digest = %+v", d)
+	}
+	if d.Click != "pulse://events" {
+		t.Errorf("digest click = %q, want pulse://events", d.Click)
 	}
 
 	// Digested keys are in cooldown, and the queue is empty.

@@ -50,6 +50,9 @@ type Message struct {
 	Body     string
 	Severity string
 	Kind     string
+	// Click is a deep link opened when the notification is tapped (see
+	// "Deep links" in api/openapi.yaml). Empty means just open the app.
+	Click string
 }
 
 type Sender interface {
@@ -127,7 +130,7 @@ func (n *Notifier) handle(ctx context.Context, e store.Event) {
 		}
 		return
 	}
-	n.deliver(ctx, Message{Title: e.Title, Body: e.Body, Severity: e.Severity, Kind: e.Kind}, e.Key)
+	n.deliver(ctx, eventMessage(e), e.Key)
 }
 
 // flush sends whatever quiet hours held back, as one message.
@@ -145,7 +148,7 @@ func (n *Notifier) flush(ctx context.Context) {
 		return
 	case 1:
 		e := held[0]
-		n.deliver(ctx, Message{Title: e.Title, Body: e.Body, Severity: e.Severity, Kind: e.Kind}, e.Key)
+		n.deliver(ctx, eventMessage(e), e.Key)
 		return
 	}
 	n.deliver(ctx, digest(held), "")
@@ -155,6 +158,11 @@ func (n *Notifier) flush(ctx context.Context) {
 			n.log.Error("notify: mark sent", "err", err)
 		}
 	}
+}
+
+// eventMessage is the notification for a single event, linking to it.
+func eventMessage(e store.Event) Message {
+	return Message{Title: e.Title, Body: e.Body, Severity: e.Severity, Kind: e.Kind, Click: "pulse://events/" + e.ID}
 }
 
 const digestLines = 15
@@ -178,6 +186,7 @@ func digest(events []store.Event) Message {
 		Body:     strings.TrimRight(b.String(), "\n"),
 		Severity: severity,
 		Kind:     "digest",
+		Click:    "pulse://events",
 	}
 }
 

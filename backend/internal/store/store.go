@@ -54,6 +54,29 @@ CREATE TABLE IF NOT EXISTS notify_queue (
 	event_id  TEXT    NOT NULL,
 	queued_at INTEGER NOT NULL
 );
+
+-- Mirrored events get a new id each time they recur (that's what moves them
+-- back to the top of the timeline). Old ids live on here so links already
+-- handed out, such as a notification's click action, still resolve.
+CREATE TABLE IF NOT EXISTS event_aliases (
+	old_id TEXT PRIMARY KEY,
+	ext_id TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS event_aliases_ext ON event_aliases (ext_id);
+
+CREATE TRIGGER IF NOT EXISTS events_keep_old_id
+AFTER UPDATE OF id ON events
+WHEN OLD.ext_id IS NOT NULL AND OLD.id <> NEW.id
+BEGIN
+	INSERT OR REPLACE INTO event_aliases (old_id, ext_id) VALUES (OLD.id, OLD.ext_id);
+END;
+
+CREATE TRIGGER IF NOT EXISTS events_drop_aliases
+AFTER DELETE ON events
+WHEN OLD.ext_id IS NOT NULL
+BEGIN
+	DELETE FROM event_aliases WHERE ext_id = OLD.ext_id;
+END;
 `
 
 var severities = []string{"info", "warning", "critical"}
@@ -173,6 +196,30 @@ func (s *Store) UpsertExternal(ctx context.Context, extID string, e Event) error
 	return nil
 }
 
+// ErrNotFound is returned for an event id that doesn't exist (or has been
+// pruned).
+var ErrNotFound = errors.New("not found")
+
+// GetEvent returns one event. An id a mirrored event has since replaced
+// resolves to the event's current version, whose ID differs from the one
+// asked for.
+func (s *Store) GetEvent(ctx context.Context, id string) (Event, error) {
+	const cols = `e.id, e.ts, e.source, e.kind, e.severity, e.title, e.body, e.key`
+	events, err := s.queryEvents(ctx, `SELECT `+cols+` FROM events e WHERE e.id = ?`, id)
+	if err == nil && len(events) == 0 {
+		events, err = s.queryEvents(ctx, `
+			SELECT `+cols+` FROM event_aliases a JOIN events e ON e.ext_id = a.ext_id
+			WHERE a.old_id = ?`, id)
+	}
+	if err != nil {
+		return Event{}, err
+	}
+	if len(events) == 0 {
+		return Event{}, ErrNotFound
+	}
+	return events[0], nil
+}
+
 // ── Notification state ─────────────────────────────────────────────────────
 
 // LastNotified reports when a notification for key last went out.
@@ -215,7 +262,9 @@ func (s *Store) TakeDeferred(ctx context.Context) ([]Event, error) {
 	defer tx.Rollback()
 	rows, err := tx.QueryContext(ctx, `
 		SELECT e.id, e.ts, e.source, e.kind, e.severity, e.title, e.body, e.key
-		FROM notify_queue q JOIN events e ON e.id = q.event_id
+		FROM notify_queue q
+		LEFT JOIN event_aliases a ON a.old_id = q.event_id
+		JOIN events e ON e.id = q.event_id OR (a.ext_id IS NOT NULL AND e.ext_id = a.ext_id)
 		ORDER BY e.id`)
 	if err != nil {
 		return nil, err

@@ -80,6 +80,7 @@ token.
 | GET | `/v1/pods/{ns}/{pod}/logs?container=&tail=200&previous=` | plain text; `previous=true` for the crashed instance |
 | GET | `/v1/pods/{ns}/{pod}/logs/stream?container=&tail=200` | follow as Server-Sent Events |
 | GET | `/v1/events?before=&minSeverity=&source=&kind=&limit=` | unified timeline, newest first, cursor = ULID |
+| GET | `/v1/events/{id}` | one event; ids replaced by a recurrence still resolve |
 | GET | `/v1/actions` | the allowlisted actions, so the app can render buttons (phase 3) |
 | POST | `/v1/actions/{id}` | run one allowlisted action (phase 3) |
 | POST | `/v1/devices` | register a push target (APNs token, phase 4) |
@@ -88,6 +89,22 @@ token.
 The spec in `api/openapi.yaml` changes before any handler does. The Swift
 client is generated from it with Apple's `swift-openapi-generator`, so the app
 never hand-writes models.
+
+### Deep links
+
+The app registers `pulse://`. The server emits these links and the app opens
+them (the table is also in `api/openapi.yaml`):
+
+| Link | Emitted by | Opens |
+|---|---|---|
+| `pulse://enroll?url=…&token=…` | `pulse token create` QR | enrollment |
+| `pulse://events/<id>` | ntfy click action, single-event notification | that event |
+| `pulse://events` | ntfy click action, quiet-hours digest | the timeline |
+
+Mirrored events (crashloops, repeating Kubernetes warnings) get a new id each
+time they recur, which is what moves them back to the top of the timeline. A
+SQLite trigger keeps each replaced id in `event_aliases`, so a link from an
+earlier notification resolves to the current version of the event.
 
 ## Auth and exposure
 
