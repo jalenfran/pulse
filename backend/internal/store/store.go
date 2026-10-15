@@ -41,6 +41,19 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE INDEX IF NOT EXISTS events_source_kind ON events (source, kind, id);
 CREATE INDEX IF NOT EXISTS events_ts ON events (ts);
+
+-- When a notification last went out for each event key (for the cooldown).
+CREATE TABLE IF NOT EXISTS notify_sent (
+	key     TEXT    PRIMARY KEY,
+	sent_at INTEGER NOT NULL
+);
+
+-- Notifications held back by quiet hours: the newest event per key.
+CREATE TABLE IF NOT EXISTS notify_queue (
+	key       TEXT    PRIMARY KEY,
+	event_id  TEXT    NOT NULL,
+	queued_at INTEGER NOT NULL
+);
 `
 
 var severities = []string{"info", "warning", "critical"}
@@ -74,7 +87,19 @@ type Token struct {
 }
 
 type Store struct {
-	db *sql.DB
+	db      *sql.DB
+	onEvent func(Event)
+}
+
+// OnEvent registers a hook called after an event is stored, and after a
+// mirrored event is refreshed with something new. It runs on the writer's
+// goroutine, so it must not block.
+func (s *Store) OnEvent(fn func(Event)) { s.onEvent = fn }
+
+func (s *Store) emit(e Event) {
+	if s.onEvent != nil {
+		s.onEvent(e)
+	}
 }
 
 func Open(path string) (*Store, error) {
@@ -111,7 +136,11 @@ func (s *Store) AddEvent(ctx context.Context, e Event) (Event, error) {
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO events (id, ts, source, kind, severity, title, body, key) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		e.ID, e.TS.UnixMilli(), e.Source, e.Kind, rank, e.Title, e.Body, e.Key)
-	return e, err
+	if err != nil {
+		return e, err
+	}
+	s.emit(e)
+	return e, nil
 }
 
 // UpsertExternal stores an event mirrored from an outside source, identified
@@ -123,15 +152,82 @@ func (s *Store) UpsertExternal(ctx context.Context, extID string, e Event) error
 	if !ok {
 		return fmt.Errorf("unknown severity %q", e.Severity)
 	}
-	_, err := s.db.ExecContext(ctx, `
+	e.TS = e.TS.UTC().Truncate(time.Millisecond)
+	e.ID = newID(e.TS)
+	res, err := s.db.ExecContext(ctx, `
 		INSERT INTO events (id, ext_id, ts, source, kind, severity, title, body, key)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (ext_id) DO UPDATE SET
 			id = excluded.id, ts = excluded.ts, severity = excluded.severity,
 			title = excluded.title, body = excluded.body
 		WHERE excluded.ts > events.ts`,
-		newID(e.TS), extID, e.TS.UnixMilli(), e.Source, e.Kind, rank, e.Title, e.Body, e.Key)
+		e.ID, extID, e.TS.UnixMilli(), e.Source, e.Kind, rank, e.Title, e.Body, e.Key)
+	if err != nil {
+		return err
+	}
+	// Zero rows means the WHERE skipped a stale re-sighting: nothing new to
+	// tell anyone about.
+	if n, err := res.RowsAffected(); err == nil && n > 0 {
+		s.emit(e)
+	}
+	return nil
+}
+
+// ── Notification state ─────────────────────────────────────────────────────
+
+// LastNotified reports when a notification for key last went out.
+func (s *Store) LastNotified(ctx context.Context, key string) (time.Time, bool, error) {
+	var ms int64
+	err := s.db.QueryRowContext(ctx, `SELECT sent_at FROM notify_sent WHERE key = ?`, key).Scan(&ms)
+	if errors.Is(err, sql.ErrNoRows) {
+		return time.Time{}, false, nil
+	}
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	return time.UnixMilli(ms), true, nil
+}
+
+func (s *Store) MarkNotified(ctx context.Context, key string, at time.Time) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO notify_sent (key, sent_at) VALUES (?, ?)
+		ON CONFLICT (key) DO UPDATE SET sent_at = excluded.sent_at`, key, at.UnixMilli())
 	return err
+}
+
+// Defer holds an event's notification until quiet hours end. A newer event
+// with the same key replaces the held one.
+func (s *Store) Defer(ctx context.Context, e Event) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO notify_queue (key, event_id, queued_at) VALUES (?, ?, ?)
+		ON CONFLICT (key) DO UPDATE SET event_id = excluded.event_id, queued_at = excluded.queued_at`,
+		e.Key, e.ID, time.Now().UnixMilli())
+	return err
+}
+
+// TakeDeferred empties the quiet-hours queue and returns its events, oldest
+// first. Events pruned in the meantime are dropped.
+func (s *Store) TakeDeferred(ctx context.Context) ([]Event, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	rows, err := tx.QueryContext(ctx, `
+		SELECT e.id, e.ts, e.source, e.kind, e.severity, e.title, e.body, e.key
+		FROM notify_queue q JOIN events e ON e.id = q.event_id
+		ORDER BY e.id`)
+	if err != nil {
+		return nil, err
+	}
+	events, err := scanEvents(rows)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM notify_queue`); err != nil {
+		return nil, err
+	}
+	return events, tx.Commit()
 }
 
 // newID makes a ULID whose time part is the event's own timestamp, not the
@@ -209,6 +305,12 @@ func (s *Store) queryEvents(ctx context.Context, query string, args ...any) ([]E
 	if err != nil {
 		return nil, err
 	}
+	return scanEvents(rows)
+}
+
+// scanEvents reads (id, ts, source, kind, severity, title, body, key) rows and
+// closes them.
+func scanEvents(rows *sql.Rows) ([]Event, error) {
 	defer rows.Close()
 	events := []Event{}
 	for rows.Next() {
@@ -231,6 +333,10 @@ func (s *Store) queryEvents(ctx context.Context, query string, args ...any) ([]E
 func (s *Store) Prune(ctx context.Context, cutoff time.Time) (int64, error) {
 	res, err := s.db.ExecContext(ctx, `DELETE FROM events WHERE ts < ?`, cutoff.UnixMilli())
 	if err != nil {
+		return 0, err
+	}
+	// Cooldown state older than the retention window can't matter any more.
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM notify_sent WHERE sent_at < ?`, cutoff.UnixMilli()); err != nil {
 		return 0, err
 	}
 	return res.RowsAffected()
@@ -328,4 +434,13 @@ func (s *Store) Authenticate(ctx context.Context, raw string) (*Token, error) {
 func hashToken(raw string) string {
 	sum := sha256.Sum256([]byte(raw))
 	return hex.EncodeToString(sum[:])
+}
+
+// PurgeSource deletes every event from one source, e.g. a retired host.
+func (s *Store) PurgeSource(ctx context.Context, source string) (int64, error) {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM events WHERE source = ?`, source)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }

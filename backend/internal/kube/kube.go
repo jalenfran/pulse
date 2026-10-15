@@ -162,21 +162,44 @@ func (c *Cluster) onNodeUpdate(oldObj, newObj any) {
 	if wasReady == isReady {
 		return
 	}
-	e := store.Event{
-		TS:     time.Now(),
-		Source: "k8s",
-		Key:    "node-ready:" + newNode.Name,
-	}
+	name := newNode.Name
 	if isReady {
-		e.Kind, e.Severity, e.Title = "node-ready", "info", newNode.Name+" is Ready again"
-	} else {
-		e.Kind, e.Severity, e.Title = "node-notready", "critical", newNode.Name+" is NotReady"
-		if cond := nodeCondition(newNode, corev1.NodeReady); cond != nil {
-			e.Body = cond.Reason + ": " + cond.Message
-		}
+		c.record(store.Event{TS: time.Now(), Source: "k8s", Kind: "node-ready", Severity: "info",
+			Title: name + " is Ready again", Key: "node-ready:" + name})
+		return
 	}
+	e := store.Event{TS: time.Now(), Source: "k8s", Kind: "node-notready", Severity: "warning",
+		Title: name + " is NotReady", Key: "node-notready:" + name}
+	cond := nodeCondition(newNode, corev1.NodeReady)
+	if cond == nil {
+		c.record(e)
+		return
+	}
+	e.Body = cond.Reason + ": " + cond.Message
 	c.record(e)
+
+	// A node going NotReady is routine: every upgrade reboot does it for a
+	// minute or two. Only a node that stays down is critical, which is what
+	// gets through quiet hours. Matching the transition time makes sure it's
+	// still the same outage, not a later one with its own timer.
+	since := cond.LastTransitionTime
+	time.AfterFunc(nodeDownAfter, func() {
+		n, err := c.nodes.Get(name)
+		if err != nil || nodeReady(n) {
+			return
+		}
+		if now := nodeCondition(n, corev1.NodeReady); now == nil || !now.LastTransitionTime.Equal(&since) {
+			return
+		}
+		c.record(store.Event{TS: time.Now(), Source: "k8s", Kind: "node-down", Severity: "critical",
+			Title: fmt.Sprintf("%s has been NotReady for %s", name, nodeDownAfter),
+			Body:  e.Body, Key: "node-down:" + name})
+	})
 }
+
+// nodeDownAfter is how long a node may stay NotReady before it counts as
+// down. Upgrade reboots here take about two minutes.
+const nodeDownAfter = 5 * time.Minute
 
 // onPodUpdate records a container entering CrashLoopBackOff. Each pod
 // container gets one timeline row that is refreshed on every new crash,

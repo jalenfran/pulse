@@ -32,6 +32,51 @@ If you change an endpoint, update `api/openapi.yaml` in the same commit.
 | `PULSE_ADDR` | `:8080` | listen address |
 | `PULSE_PUBLIC_URL` | (unset) | URL the app should use; goes in the enrollment QR. Without it, `token create` prints the token but no QR |
 | `PULSE_RETENTION_DAYS` | `30` | event retention |
+| `PULSE_NTFY_URL` | (unset) | ntfy server base URL. Unset disables notifications |
+| `PULSE_NTFY_TOPIC` | `pulse` | ntfy topic |
+| `PULSE_NTFY_TOKEN` | (unset) | ntfy access token with write access to the topic |
+| `PULSE_NOTIFY_MIN_SEVERITY` | `warning` | lowest severity that notifies |
+| `PULSE_NOTIFY_ALWAYS` | `nixos-upgrade,node-ready` | kinds that notify at any severity |
+| `PULSE_NOTIFY_IGNORE` | `k8s-event` | kinds that never notify (raw Kubernetes warnings are noisy; crashloops and node outages have their own kinds) |
+| `PULSE_NOTIFY_COOLDOWN` | `6h` | at most one notification per event key in this window |
+| `PULSE_QUIET_HOURS` | `23-8` | local hours when only `critical` goes out; the rest arrives as one digest afterwards. `off` disables |
+| `TZ` | UTC | time zone for quiet hours |
+
+## Notifications
+
+Pulse pushes through [ntfy](https://ntfy.sh). Point `PULSE_NTFY_URL` at your
+own server (or ntfy.sh with an unguessable topic) and subscribe to the topic
+in the ntfy app. With a self-hosted server on iOS, set
+`upstream-base-url: https://ntfy.sh` in ntfy's config for instant delivery.
+Only a hash of the message ID goes to ntfy.sh, and the app fetches the
+content from your server.
+
+A node going NotReady is a `warning`. It only becomes `critical` (paging
+through quiet hours) if the node is still down 5 minutes later, so routine
+reboots don't wake anyone.
+
+```sh
+kubectl -n pulse exec deploy/pulse -- /pulse notify test
+```
+
+## Host events
+
+Anything that can run `curl` can report. POST JSON to `/v1/ingest` with a
+host token:
+
+```sh
+curl -H "Authorization: Bearer $TOKEN" https://pulse.example.com/v1/ingest \
+  -d '{"kind":"node-health","severity":"warning","title":"node2 health check failed","body":"/ is 91% full"}'
+```
+
+Hook it to systemd with `OnFailure=` / `ExecStartPost=`. Kinds Pulse knows
+about: `nixos-upgrade`, `node-health` and `boot` show on the overview's host
+cards, and `ssh-login` and anything else go to the timeline. To remove a
+retired host's history:
+
+```sh
+kubectl -n pulse exec deploy/pulse -- /pulse events purge --source host:old-node
+```
 
 ## Deploy
 
@@ -57,8 +102,8 @@ patches:
 Without a registry, build on the node and import the image into k3s directly:
 
 ```sh
-docker build -t pulse:0.1.0 backend/
-docker save pulse:0.1.0 | sudo k3s ctr images import -
+docker build -t pulse:0.2.0 backend/
+docker save pulse:0.2.0 | sudo k3s ctr images import -
 kubectl apply -k my-cluster/pulse
 ```
 

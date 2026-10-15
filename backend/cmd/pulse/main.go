@@ -5,6 +5,8 @@
 //	pulse token create --host <host>    mint a host token for /v1/ingest
 //	pulse token list
 //	pulse token revoke [--host] <name>
+//	pulse notify test [message]          send a test notification
+//	pulse events purge --source <source> delete a source's events (a retired host)
 //
 // The token subcommands open the same SQLite file as the server, so in the
 // cluster they run through kubectl exec:
@@ -26,6 +28,9 @@ import (
 	"syscall"
 	"text/tabwriter"
 	"time"
+	// Embedded zone data: the distroless image has none, and quiet hours
+	// are in local time (TZ).
+	_ "time/tzdata"
 
 	"github.com/mdp/qrterminal/v3"
 	"k8s.io/client-go/rest"
@@ -44,6 +49,10 @@ func main() {
 	switch os.Args[1] {
 	case "serve":
 		err = serve()
+	case "events":
+		err = eventsCmd(os.Args[2:])
+	case "notify":
+		err = notifyCmd(os.Args[2:])
 	case "token":
 		err = tokenCmd(os.Args[2:])
 	default:
@@ -60,7 +69,9 @@ func usage() {
   pulse serve
   pulse token create <name> | --host <hostname>
   pulse token list
-  pulse token revoke [--host] <name>`)
+  pulse token revoke [--host] <name>
+  pulse notify test [message]
+  pulse events purge --source <source>`)
 	os.Exit(2)
 }
 
@@ -102,6 +113,18 @@ func serve() error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	notifier, err := notifierFromEnv(st, log)
+	if err != nil {
+		return err
+	}
+	if notifier != nil {
+		// Hooked up before the informers start, so nothing they record is missed.
+		st.OnEvent(notifier.Consider)
+		go notifier.Run(ctx)
+	} else {
+		log.Info("notifications disabled (PULSE_NTFY_URL unset)")
+	}
 
 	// The server comes up immediately so liveness passes; /readyz reports
 	// 503 until the caches have synced.
@@ -244,5 +267,30 @@ func tokenCmd(args []string) error {
 		return nil
 	}
 	usage()
+	return nil
+}
+
+// ── events ─────────────────────────────────────────────────────────────────
+
+func eventsCmd(args []string) error {
+	if len(args) == 0 || args[0] != "purge" {
+		usage()
+	}
+	fs := flag.NewFlagSet("events purge", flag.ExitOnError)
+	source := fs.String("source", "", `source to delete, e.g. "host:old-node"`)
+	_ = fs.Parse(args[1:])
+	if *source == "" {
+		usage()
+	}
+	st, err := openStore()
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	n, err := st.PurgeSource(context.Background(), *source)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Deleted %d events from %s.\n", n, *source)
 	return nil
 }

@@ -132,7 +132,7 @@ Rules run when an event arrives:
 - `critical` gets through quiet hours (23:00–08:00) and everything else waits
   for the morning
 
-**Phase 2: ntfy.** Self-hosted ntfy runs in the `pulse` namespace and the
+**Phase 2: ntfy.** Pulse publishes to a self-hosted ntfy server, and the
 phone uses the ntfy iOS app. For instant delivery on iOS, the self-hosted
 server sets `upstream-base-url: https://ntfy.sh`. Only a poll request
 carrying a hash of the message ID goes upstream, and the content stays on the
@@ -145,9 +145,10 @@ paid Apple Developer account. Phase 4 also brings widgets and Live Activities.
 
 SQLite in WAL mode on a node-local PVC (`local-path`), never NFS, because
 SQLite locking over NFS is unreliable. The tables are `events` (30-day
-retention), `tokens`, and later `devices` and `notify_state` (last sent per
-key). Losing the database costs the event history and means re-minting
-tokens. Nothing else is stored there.
+retention), `tokens`, `notify_sent` (last notification per key, for the
+cooldown), `notify_queue` (held during quiet hours), and later `devices`.
+Losing the database costs the event history and means re-minting tokens.
+Nothing else is stored there.
 
 ## Repo layout
 
@@ -169,8 +170,9 @@ rest of your cluster config.
 1. **Read-only MVP.** Covers `openapi.yaml`, user tokens, overview, nodes,
    workloads, pods, logs and k8s-sourced events. On the iOS side: Overview,
    Nodes, Workloads and Logs screens.
-2. **Host events + alerts.** The host reporter (upgrade, health check, boot,
-   ssh-login) plus ntfy.
+2. **Host events + alerts.** Done: the notifier (rules, cooldown, quiet-hours
+   digest) publishing to ntfy, plus a host reporter for upgrades, health
+   checks, boots and SSH logins.
 3. **Actions + probes.** Allowlisted restarts, plus endpoint and cert probes.
 4. **Native polish.** APNs, widgets, and Live Activities (for example while
    an upgrade is running).
