@@ -7,6 +7,8 @@ enum Route: Hashable {
     case pod(namespace: String, name: String)
     case workload(namespace: String, name: String, kind: Workload.KindPayload?)
     case event(Event)
+    /// From a notification link; loaded on arrival.
+    case eventID(String)
 }
 
 extension View {
@@ -21,6 +23,8 @@ extension View {
                 WorkloadDetailView(namespace: namespace, name: name, kind: kind)
             case .event(let event):
                 EventDetailView(event: event)
+            case .eventID(let id):
+                EventLinkView(id: id)
             }
         }
     }

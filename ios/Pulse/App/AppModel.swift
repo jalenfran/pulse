@@ -11,6 +11,8 @@ enum AppTab: Hashable {
 final class AppModel {
     private(set) var client: PulseClient?
     var tab: AppTab = .overview
+    /// The Events tab's stack, so notification links can push an event.
+    var eventsPath: [Route] = []
     /// Set when an opened `pulse://` link can't be used.
     var linkError: String?
     private(set) var isEnrolling = false
@@ -20,9 +22,9 @@ final class AppModel {
             client = PulseClient(enrollment: enrollment)
         }
         #if DEBUG
-        // Simulator runs: `SIMCTL_CHILD_PULSE_ENROLL='pulse://enroll?…' xcrun simctl launch …`
-        // enrolls without the system's "Open in Pulse?" prompt.
-        if let link = ProcessInfo.processInfo.environment["PULSE_ENROLL"].flatMap(URL.init(string:)) {
+        // Simulator runs: `SIMCTL_CHILD_PULSE_OPEN='pulse://…' xcrun simctl launch …`
+        // opens a link without the system's "Open in Pulse?" prompt.
+        if let link = ProcessInfo.processInfo.environment["PULSE_OPEN"].flatMap(URL.init(string:)) {
             open(link)
         }
         switch ProcessInfo.processInfo.environment["PULSE_TAB"] {
@@ -61,14 +63,28 @@ final class AppModel {
         linkError = PulseError.unauthorized.localizedDescription
     }
 
-    /// `pulse://enroll?…`, from the system Camera app or a pasted link.
+    /// `pulse://enroll?…` from a QR code, or `pulse://events[/<id>]` from
+    /// tapping an ntfy notification.
     func open(_ url: URL) {
-        Task {
-            do {
-                try await enroll(Enrollment(link: url))
-            } catch {
-                linkError = error.localizedDescription
+        switch PulseLink(url) {
+        case .enroll:
+            Task {
+                do {
+                    try await enroll(Enrollment(link: url))
+                } catch {
+                    linkError = error.localizedDescription
+                }
             }
+        case .timeline:
+            guard client != nil else { return }
+            tab = .events
+            eventsPath = []
+        case .event(let id):
+            guard client != nil else { return }
+            tab = .events
+            eventsPath = [.eventID(id)]
+        case nil:
+            linkError = String(localized: "Pulse can't open that link.")
         }
     }
 }

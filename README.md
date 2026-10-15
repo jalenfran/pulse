@@ -153,10 +153,11 @@ cd ios/PulseKit && swift test
 ```
 
 Debug builds read two environment variables, which make simulator runs
-scriptable without tapping through enrollment:
+scriptable without tapping. `PULSE_OPEN` takes any link the app handles
+(`pulse://enroll?…`, `pulse://events`, `pulse://events/<id>`):
 
 ```sh
-SIMCTL_CHILD_PULSE_ENROLL='pulse://enroll?url=…&token=…' \
+SIMCTL_CHILD_PULSE_OPEN='pulse://enroll?url=…&token=…' \
 SIMCTL_CHILD_PULSE_TAB=nodes \
   xcrun simctl launch booted dev.homelab.pulse
 ```

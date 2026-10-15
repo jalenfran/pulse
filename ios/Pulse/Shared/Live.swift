@@ -5,7 +5,8 @@ import SwiftUI
 /// supports pull to refresh. Stale data stays on screen when a refresh fails;
 /// a small glass capsule says so instead of replacing the content.
 struct Live<Value: Sendable, Content: View>: View {
-    var every: Duration = .seconds(15)
+    /// Nil loads once (plus pull to refresh and returning to the foreground).
+    var every: Duration? = .seconds(15)
     let load: () async throws -> Value
     @ViewBuilder let content: (Value) -> Content
 
@@ -18,6 +19,12 @@ struct Live<Value: Sendable, Content: View>: View {
         Group {
             if let value {
                 content(value)
+            } else if (error as? PulseError) == .notFound {
+                ContentUnavailableView(
+                    "Not Found",
+                    systemImage: "questionmark.circle",
+                    description: Text("It may have been deleted, or aged out of the 30-day history.")
+                )
             } else if let error {
                 ContentUnavailableView {
                     Label("Can't Reach Pulse", systemImage: "wifi.exclamationmark")
@@ -47,9 +54,11 @@ struct Live<Value: Sendable, Content: View>: View {
         .refreshable { await refresh() }
         .task(id: scenePhase) {
             guard scenePhase == .active else { return }
+            await refresh()
+            guard let every else { return }
             while !Task.isCancelled {
-                await refresh()
                 try? await Task.sleep(for: every)
+                await refresh()
             }
         }
     }

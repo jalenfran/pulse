@@ -29,7 +29,8 @@ struct EventsView: View {
     @State private var error: (any Error)?
 
     var body: some View {
-        NavigationStack {
+        @Bindable var app = app
+        NavigationStack(path: $app.eventsPath) {
             content
                 .navigationTitle("Events")
                 .toolbar {
@@ -38,11 +39,13 @@ struct EventsView: View {
                 .refreshable { await reload() }
                 .task(id: filter) { await reload() }
                 .task(id: scenePhase) {
-                    // New events arrive at the top; poll for them while visible.
+                    // New events arrive at the top: check on returning to the
+                    // foreground, then every 30s while visible. The server
+                    // answers from cached state, so faster gains nothing.
                     guard scenePhase == .active else { return }
                     while !Task.isCancelled {
-                        try? await Task.sleep(for: .seconds(30))
                         await fetchNewer()
+                        try? await Task.sleep(for: .seconds(30))
                     }
                 }
                 .pulseDestinations()
@@ -255,6 +258,20 @@ struct EventDetailView: View {
                     }
                 }
             }
+        }
+        .navigationTitle("Event")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// An event opened from a notification, known only by its ID.
+struct EventLinkView: View {
+    let id: String
+    @Environment(\.pulse) private var pulse
+
+    var body: some View {
+        Live(every: nil, load: { try await pulse.event(id: id) }) { event in
+            EventDetailView(event: event)
         }
         .navigationTitle("Event")
         .navigationBarTitleDisplayMode(.inline)

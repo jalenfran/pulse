@@ -2,6 +2,7 @@ import Foundation
 import HTTPTypes
 import OpenAPIRuntime
 import OpenAPIURLSession
+import os
 
 public enum PulseError: LocalizedError, Equatable {
     case unauthorized
@@ -168,6 +169,17 @@ public struct PulseClient: Sendable {
         case .undocumented(let code, _): throw PulseError.unexpectedStatus(code)
         }
     }
+
+    /// One event by ID, e.g. from a notification link. A recurring event
+    /// comes back as its current version, whose `id` may differ.
+    public func event(id: String) async throws -> Event {
+        switch try await client.getEvent(path: .init(id: id)) {
+        case .ok(let r): return try r.body.json
+        case .unauthorized: throw PulseError.unauthorized
+        case .notFound: throw PulseError.notFound
+        case .undocumented(let code, _): throw PulseError.unexpectedStatus(code)
+        }
+    }
 }
 
 extension PulseError {
@@ -192,6 +204,15 @@ struct BearerToken: ClientMiddleware {
     ) async throws -> (HTTPResponse, HTTPBody?) {
         var request = request
         request.headerFields[.authorization] = "Bearer \(token)"
-        return try await next(request, body, baseURL)
+        let start = ContinuousClock.now
+        let (response, responseBody) = try await next(request, body, baseURL)
+        // Debug level: not persisted unless someone is streaming the log.
+        // `log stream --level debug --predicate 'subsystem == "Pulse"'`
+        Self.log.debug(
+            "\(request.method.rawValue, privacy: .public) \(request.path ?? "", privacy: .public) \(response.status.code, privacy: .public) \((ContinuousClock.now - start).formatted(.units(allowed: [.milliseconds])), privacy: .public)"
+        )
+        return (response, responseBody)
     }
+
+    private static let log = Logger(subsystem: "Pulse", category: "http")
 }

@@ -190,3 +190,44 @@ struct MockTransport: ClientTransport {
         #expect(page.items[0].severity > .warning)
     }
 }
+
+@Suite struct PulseLinkTests {
+    @Test func parsesClickActions() {
+        #expect(PulseLink(URL(string: "pulse://events")!) == .timeline)
+        #expect(PulseLink(URL(string: "pulse://events/")!) == .timeline)
+        #expect(PulseLink(URL(string: "pulse://events/01JABCDEFGHJKMNPQRSTVWXYZ0")!) == .event(id: "01JABCDEFGHJKMNPQRSTVWXYZ0"))
+        #expect(PulseLink(URL(string: "pulse://enroll?url=x&token=y")!) == .enroll)
+    }
+
+    @Test(arguments: [
+        "https://pulse.example.com/events", "pulse://nodes/node1", "pulse://events/a/b", "pulse://events/..%2Fx",
+    ])
+    func rejectsOthers(_ link: String) {
+        #expect(PulseLink(URL(string: link)!) == nil)
+    }
+}
+
+@Suite struct EventLookupTests {
+    let enrollment = Enrollment(serverURL: URL(string: "https://pulse.example.com")!, token: "pls_secret")
+
+    func client(status: HTTPResponse.Status = .ok, body: String) -> PulseClient {
+        PulseClient(enrollment: enrollment, transport: MockTransport { request in
+            #expect(request.path == "/v1/events/01JB")
+            var response = HTTPResponse(status: status)
+            response.headerFields[.contentType] = "application/json"
+            return (response, HTTPBody(body))
+        })
+    }
+
+    @Test func returnsTheCurrentVersion() async throws {
+        // A recurring mirrored event resolves to its newest id.
+        let body = #"{"id":"01JC","ts":"2026-10-15T04:03:11Z","source":"k8s","kind":"pod-crashloop","severity":"warning","title":"t","key":"k"}"#
+        #expect(try await client(body: body).event(id: "01JB").id == "01JC")
+    }
+
+    @Test func mapsNotFound() async throws {
+        await #expect(throws: PulseError.notFound) {
+            try await client(status: .notFound, body: #"{"error":"not found"}"#).event(id: "01JB")
+        }
+    }
+}
