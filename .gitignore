@@ -1,0 +1,6 @@
+# SQLite files from local runs
+*.db
+*.db-shm
+*.db-wal
+# go build output
+/backend/pulse

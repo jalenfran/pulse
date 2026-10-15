@@ -1,0 +1,149 @@
+# Pulse: generic kustomize base. See DESIGN.md.
+#
+# Site specifics belong in an overlay (see README): pin the pod to the node
+# that holds its image and volume, expose the Service to your reverse proxy,
+# and set PULSE_PUBLIC_URL. The volume must be node-local (local-path), never
+# NFS: SQLite locking over NFS is unreliable.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: pulse
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pulse
+  namespace: pulse
+---
+# Read-only, and no access to Secrets or ConfigMaps at all. pods/log is the
+# most sensitive grant here: apps can print secrets to their logs, which is
+# one reason pulse is LAN/tailnet-only.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: pulse-read
+rules:
+  - apiGroups: [""]
+    resources: [nodes, pods, events]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get]
+  - apiGroups: [apps]
+    resources: [deployments, statefulsets, daemonsets]
+    verbs: [get, list, watch]
+  - apiGroups: [batch]
+    resources: [jobs, cronjobs]
+    verbs: [get, list, watch]
+  - apiGroups: [metrics.k8s.io]
+    resources: [nodes, pods]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: pulse-read
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: pulse-read
+subjects:
+  - kind: ServiceAccount
+    name: pulse
+    namespace: pulse
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pulse-data
+  namespace: pulse
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pulse
+  namespace: pulse
+spec:
+  replicas: 1 # SQLite: exactly one writer
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: pulse
+  template:
+    metadata:
+      labels:
+        app: pulse
+    spec:
+      serviceAccountName: pulse
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: pulse
+          image: pulse:0.1.0
+          imagePullPolicy: IfNotPresent
+          args: [serve]
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: PULSE_DB
+              value: /data/pulse.db
+            - name: PULSE_RETENTION_DAYS
+              value: "30"
+            # Keeps the Go GC well inside the container limit.
+            - name: GOMEMLIMIT
+              value: 80MiB
+          resources:
+            requests:
+              cpu: 20m
+              memory: 48Mi
+            limits:
+              memory: 128Mi
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 30
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: pulse-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pulse
+  namespace: pulse
+spec:
+  selector:
+    app: pulse
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

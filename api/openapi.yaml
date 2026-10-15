@@ -1,0 +1,520 @@
+openapi: 3.1.0
+info:
+  title: Pulse
+  version: 0.1.0
+  description: |
+    Private status API for the homelab. Reachable only from the LAN and the
+    tailnet, and every /v1 call needs a bearer token.
+
+    User tokens (minted with `pulse token create <name>`) can call everything
+    except /v1/ingest. Host tokens (`pulse token create --host <hostname>`) can
+    call only /v1/ingest.
+
+    CPU values are millicores and memory values are bytes.
+servers:
+  - url: https://pulse.example.com
+    description: Your deployment. The app takes the real URL from the enrollment QR.
+security:
+  - bearer: []
+
+paths:
+  /healthz:
+    get:
+      operationId: getHealth
+      security: []
+      responses:
+        "200":
+          description: Process is up.
+          content:
+            text/plain:
+              schema: { type: string }
+
+  /readyz:
+    get:
+      operationId: getReady
+      security: []
+      responses:
+        "200":
+          description: Kubernetes caches are synced.
+          content:
+            text/plain:
+              schema: { type: string }
+        "503":
+          description: Still syncing.
+          content:
+            text/plain:
+              schema: { type: string }
+
+  /v1/overview:
+    get:
+      operationId: getOverview
+      summary: Everything the home screen and widget need, in one call.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Overview" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /v1/nodes:
+    get:
+      operationId: listNodes
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/NodeSummary" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /v1/nodes/{name}:
+    get:
+      operationId: getNode
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NodeDetail" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/workloads:
+    get:
+      operationId: listWorkloads
+      parameters:
+        - { name: namespace, in: query, required: false, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Workload" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /v1/pods:
+    get:
+      operationId: listPods
+      parameters:
+        - { name: namespace, in: query, required: false, schema: { type: string } }
+        - { name: node, in: query, required: false, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/PodSummary" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /v1/pods/{namespace}/{pod}:
+    get:
+      operationId: getPod
+      parameters:
+        - { $ref: "#/components/parameters/Namespace" }
+        - { $ref: "#/components/parameters/Pod" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PodDetail" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/pods/{namespace}/{pod}/logs:
+    get:
+      operationId: getPodLogs
+      summary: The last N log lines as plain text.
+      parameters:
+        - { $ref: "#/components/parameters/Namespace" }
+        - { $ref: "#/components/parameters/Pod" }
+        - { $ref: "#/components/parameters/Container" }
+        - { $ref: "#/components/parameters/Tail" }
+        - { $ref: "#/components/parameters/Timestamps" }
+        - name: previous
+          in: query
+          required: false
+          description: Logs of the previous (crashed) container instance.
+          schema: { type: boolean, default: false }
+      responses:
+        "200":
+          description: Log text, capped at 10 MiB.
+          content:
+            text/plain:
+              schema: { type: string }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/pods/{namespace}/{pod}/logs/stream:
+    get:
+      operationId: streamPodLogs
+      summary: Follow logs as Server-Sent Events.
+      description: |
+        Starts with the last `tail` lines, then follows. Each line is one
+        `data:` event. A `: ping` comment is sent every 15s to keep proxies
+        from closing the connection. When the container exits the stream
+        sends `event: end` and closes.
+      parameters:
+        - { $ref: "#/components/parameters/Namespace" }
+        - { $ref: "#/components/parameters/Pod" }
+        - { $ref: "#/components/parameters/Container" }
+        - { $ref: "#/components/parameters/Tail" }
+        - { $ref: "#/components/parameters/Timestamps" }
+      responses:
+        "200":
+          description: Event stream.
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/events:
+    get:
+      operationId: listEvents
+      summary: The unified timeline, newest first.
+      parameters:
+        - name: before
+          in: query
+          required: false
+          description: Cursor. Pass the previous page's nextCursor.
+          schema: { type: string }
+        - name: minSeverity
+          in: query
+          required: false
+          schema: { $ref: "#/components/schemas/Severity" }
+        - name: source
+          in: query
+          required: false
+          description: |
+            Exact source (`k8s`, `host:node2`), or a bare prefix (`host`)
+            to match every source under it.
+          schema: { type: string }
+        - name: kind
+          in: query
+          required: false
+          schema: { type: string }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Event" }
+                  nextCursor:
+                    type: string
+                    description: Absent on the last page.
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /v1/ingest:
+    post:
+      operationId: ingestEvent
+      summary: Record one event from a host. Host tokens only.
+      description: |
+        `source` is always `host:<token's host>`. A host cannot choose it.
+        `key` defaults to `<kind>:<host>`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/IngestEvent" }
+      responses:
+        "201":
+          description: Stored.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Event" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+
+  parameters:
+    Namespace: { name: namespace, in: path, required: true, schema: { type: string } }
+    Pod: { name: pod, in: path, required: true, schema: { type: string } }
+    Container:
+      name: container
+      in: query
+      required: false
+      description: Required when the pod has more than one container.
+      schema: { type: string }
+    Tail:
+      name: tail
+      in: query
+      required: false
+      schema: { type: integer, minimum: 1, maximum: 5000, default: 200 }
+    Timestamps:
+      name: timestamps
+      in: query
+      required: false
+      schema: { type: boolean, default: false }
+
+  responses:
+    BadRequest:
+      description: Invalid request.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Unauthorized:
+      description: Missing, unknown or wrong-kind token.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: No such object.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+
+    Severity:
+      type: string
+      enum: [info, warning, critical]
+
+    Usage:
+      type: object
+      required: [used, capacity, percent]
+      properties:
+        used: { type: integer, format: int64 }
+        capacity: { type: integer, format: int64, description: Allocatable. }
+        percent: { type: number, format: double }
+
+    Condition:
+      type: object
+      required: [type, status]
+      properties:
+        type: { type: string }
+        status: { type: string }
+        reason: { type: string }
+        message: { type: string }
+        lastTransitionTime: { type: string, format: date-time }
+
+    NodeSummary:
+      type: object
+      required: [name, ready, schedulable, roles, kubeletVersion, kernelVersion, osImage, internalIP, pressure, podCount, createdAt]
+      properties:
+        name: { type: string }
+        ready: { type: boolean }
+        schedulable: { type: boolean, description: False when cordoned. }
+        roles: { type: array, items: { type: string } }
+        kubeletVersion: { type: string }
+        kernelVersion: { type: string }
+        osImage: { type: string }
+        internalIP: { type: string }
+        pressure:
+          type: array
+          description: Pressure conditions currently true, e.g. DiskPressure.
+          items: { type: string }
+        podCount: { type: integer }
+        cpu: { $ref: "#/components/schemas/Usage" }
+        memory: { $ref: "#/components/schemas/Usage" }
+        createdAt: { type: string, format: date-time }
+
+    NodeDetail:
+      allOf:
+        - $ref: "#/components/schemas/NodeSummary"
+        - type: object
+          required: [conditions, pods, events]
+          properties:
+            conditions:
+              type: array
+              items: { $ref: "#/components/schemas/Condition" }
+            pods:
+              type: array
+              items: { $ref: "#/components/schemas/PodSummary" }
+            events:
+              type: array
+              description: Recent events from this host.
+              items: { $ref: "#/components/schemas/Event" }
+
+    Workload:
+      type: object
+      required: [kind, namespace, name, desired, ready, healthy, status, restarts, images]
+      properties:
+        kind: { type: string, enum: [Deployment, StatefulSet, DaemonSet, CronJob] }
+        namespace: { type: string }
+        name: { type: string }
+        desired: { type: integer }
+        ready: { type: integer }
+        healthy: { type: boolean }
+        status:
+          type: string
+          description: '"3/3" for replicated workloads; Succeeded, Failed, Running, Suspended or Never run for CronJobs.'
+        restarts: { type: integer, description: Sum over current pods. }
+        images: { type: array, items: { type: string } }
+        schedule: { type: string, description: CronJobs only. }
+        lastScheduleTime: { type: string, format: date-time, description: CronJobs only. }
+
+    PodSummary:
+      type: object
+      required: [namespace, name, node, phase, status, readyContainers, totalContainers, restarts, createdAt, problem]
+      properties:
+        namespace: { type: string }
+        name: { type: string }
+        node: { type: string }
+        phase: { type: string }
+        status: { type: string, description: Like kubectl's STATUS column. }
+        readyContainers: { type: integer }
+        totalContainers: { type: integer }
+        restarts: { type: integer }
+        owner: { type: string, description: 'e.g. "Deployment/web".' }
+        createdAt: { type: string, format: date-time }
+        problem: { type: boolean }
+
+    ContainerInfo:
+      type: object
+      required: [name, image, ready, restarts, state]
+      properties:
+        name: { type: string }
+        image: { type: string }
+        ready: { type: boolean }
+        restarts: { type: integer }
+        state: { type: string, enum: [running, waiting, terminated, unknown] }
+        reason: { type: string }
+        message: { type: string }
+        startedAt: { type: string, format: date-time }
+        lastTermination:
+          type: object
+          required: [reason, exitCode]
+          properties:
+            reason: { type: string }
+            exitCode: { type: integer }
+            finishedAt: { type: string, format: date-time }
+
+    PodDetail:
+      allOf:
+        - $ref: "#/components/schemas/PodSummary"
+        - type: object
+          required: [initContainers, containers, conditions]
+          properties:
+            ip: { type: string }
+            qosClass: { type: string }
+            initContainers:
+              type: array
+              items: { $ref: "#/components/schemas/ContainerInfo" }
+            containers:
+              type: array
+              items: { $ref: "#/components/schemas/ContainerInfo" }
+            conditions:
+              type: array
+              items: { $ref: "#/components/schemas/Condition" }
+
+    Problem:
+      type: object
+      required: [severity, kind, name, title]
+      properties:
+        severity: { $ref: "#/components/schemas/Severity" }
+        kind: { type: string, enum: [node, pod, workload, job] }
+        namespace: { type: string }
+        name: { type: string }
+        title: { type: string }
+        detail: { type: string }
+
+    HostStatus:
+      type: object
+      required: [host]
+      properties:
+        host: { type: string }
+        lastUpgrade: { $ref: "#/components/schemas/Event" }
+        lastHealth: { $ref: "#/components/schemas/Event" }
+        lastBoot: { $ref: "#/components/schemas/Event" }
+
+    Overview:
+      type: object
+      required: [generatedAt, nodes, workloads, pods, problems, hosts, recentEvents]
+      properties:
+        generatedAt: { type: string, format: date-time }
+        nodes:
+          type: array
+          items: { $ref: "#/components/schemas/NodeSummary" }
+        workloads:
+          type: object
+          required: [total, healthy]
+          properties:
+            total: { type: integer }
+            healthy: { type: integer }
+        pods:
+          type: object
+          required: [total, running, problems]
+          properties:
+            total: { type: integer }
+            running: { type: integer }
+            problems: { type: integer }
+        problems:
+          type: array
+          description: Live problems, most severe first.
+          items: { $ref: "#/components/schemas/Problem" }
+        hosts:
+          type: array
+          items: { $ref: "#/components/schemas/HostStatus" }
+        recentEvents:
+          type: array
+          items: { $ref: "#/components/schemas/Event" }
+
+    Event:
+      type: object
+      required: [id, ts, source, kind, severity, title, key]
+      properties:
+        id: { type: string, description: ULID. Also the pagination cursor. }
+        ts: { type: string, format: date-time }
+        source: { type: string, description: '"k8s" or "host:<name>".' }
+        kind: { type: string, description: 'e.g. nixos-upgrade, node-health, boot, ssh-login, k8s-event, pod-crashloop, node-notready.' }
+        severity: { $ref: "#/components/schemas/Severity" }
+        title: { type: string }
+        body: { type: string }
+        key: { type: string, description: Dedupe/cooldown key for notifications. }
+
+    IngestEvent:
+      type: object
+      required: [kind, severity, title]
+      additionalProperties: false
+      properties:
+        kind: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,39}$" }
+        severity: { $ref: "#/components/schemas/Severity" }
+        title: { type: string, maxLength: 200 }
+        body: { type: string, maxLength: 8192 }
+        key: { type: string, maxLength: 200 }
+        ts: { type: string, format: date-time, description: Defaults to now. }
