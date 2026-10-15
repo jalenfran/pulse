@@ -146,7 +146,7 @@ re-minted.
 ## iOS development
 
 Open `ios/Pulse.xcodeproj` (Xcode 26+, iOS 26+). The first build asks you to
-trust the OpenAPI generator plugin. The Mac must be on the LAN or tailnet to
+trust the PulseAPIGenerator plugin. The Mac must be on the LAN or tailnet to
 reach the API.
 
 ```

@@ -20,8 +20,14 @@ let package = Package(
             dependencies: [
                 .product(name: "OpenAPIRuntime", package: "swift-openapi-runtime"),
             ],
-            plugins: [
-                .plugin(name: "OpenAPIGenerator", package: "swift-openapi-generator"),
+            plugins: ["PulseAPIGenerator"]
+        ),
+        // Wraps swift-openapi-generator; see the plugin for why.
+        .plugin(
+            name: "PulseAPIGenerator",
+            capability: .buildTool(),
+            dependencies: [
+                .product(name: "swift-openapi-generator", package: "swift-openapi-generator"),
             ]
         ),
         .target(

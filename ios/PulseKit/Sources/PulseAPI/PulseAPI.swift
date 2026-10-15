@@ -1,2 +1,2 @@
 // Client and Types are generated at build time from openapi.yaml by the
-// OpenAPIGenerator plugin. Edit the spec, not generated code.
+// PulseAPIGenerator plugin (in Plugins/). Edit the spec, not generated code.
