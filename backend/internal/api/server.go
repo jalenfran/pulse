@@ -69,6 +69,12 @@ func tokenFrom(ctx context.Context) *store.Token {
 	return t
 }
 
+// logSlot lets requireToken tell logRequests who called. Auth runs further in
+// and attaches the token to a derived request, which the logger never sees.
+type logSlot struct{ token *store.Token }
+
+type logSlotKey struct{}
+
 // requireToken admits only bearer tokens of the given kind. User and host
 // tokens are deliberately not interchangeable: a host token leaked from a
 // node can post events but can't read the cluster.
@@ -89,6 +95,9 @@ func (s *Server) requireToken(kind string) func(http.HandlerFunc) http.Handler {
 			if tok == nil || tok.Kind != kind {
 				writeError(w, http.StatusUnauthorized, "invalid token")
 				return
+			}
+			if slot, ok := r.Context().Value(logSlotKey{}).(*logSlot); ok {
+				slot.token = tok
 			}
 			next(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, tok)))
 		})
@@ -115,11 +124,12 @@ func (s *Server) logRequests(next http.Handler) http.Handler {
 			return
 		}
 		start := time.Now()
+		slot := &logSlot{}
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
-		next.ServeHTTP(rec, r)
+		next.ServeHTTP(rec, r.WithContext(context.WithValue(r.Context(), logSlotKey{}, slot)))
 		attrs := []any{"method", r.Method, "path", r.URL.Path, "status", rec.status,
 			"dur", time.Since(start).Round(time.Millisecond), "client", r.Header.Get("X-Real-IP")}
-		if t := tokenFrom(r.Context()); t != nil {
+		if t := slot.token; t != nil {
 			attrs = append(attrs, "token", t.Kind+"/"+t.Name)
 		}
 		s.log.Info("request", attrs...)
