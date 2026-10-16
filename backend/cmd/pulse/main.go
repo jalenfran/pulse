@@ -222,7 +222,8 @@ func tokenCmd(args []string) error {
 		}
 		if kind == "host" {
 			fmt.Printf("Host token for %s (shown once):\n\n  %s\n\n", name, raw)
-			fmt.Printf("Install it on %s as root:\n\n  install -d -m 700 /var/lib/pulse\n  install -m 600 /dev/stdin /var/lib/pulse/token <<< '%s'\n", name, raw)
+			// POSIX sh, not bash: some hosts' root shell is dash (no <<<).
+			fmt.Printf("Install it on %s as root:\n\n  install -d -m 700 /var/lib/pulse\n  printf '%%s\\n' '%s' | install -m 600 /dev/stdin /var/lib/pulse/token\n", name, raw)
 			return nil
 		}
 		fmt.Printf("User token %q (shown once):\n\n  %s\n\n", name, raw)
