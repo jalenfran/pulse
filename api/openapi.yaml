@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Pulse
-  version: 0.2.2
+  version: 0.2.3
   description: |
     Private status API for the homelab. Reachable only from the LAN and the
     tailnet, and every /v1 call needs a bearer token.

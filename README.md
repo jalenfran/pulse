@@ -113,8 +113,8 @@ patches:
 Without a registry, build on the node and import the image into k3s directly:
 
 ```sh
-docker build -t pulse:0.2.2 backend/
-docker save pulse:0.2.2 | sudo k3s ctr images import -
+docker build -t pulse:0.2.3 backend/
+docker save pulse:0.2.3 | sudo k3s ctr images import -
 kubectl apply -k my-cluster/pulse
 ```
 

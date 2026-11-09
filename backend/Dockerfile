@@ -1,11 +1,11 @@
 # Build on the node and load straight into k3s (no registry):
 #
-#   docker build -t pulse:0.2.2 backend/
-#   docker save pulse:0.2.2 | sudo k3s ctr images import -
+#   docker build -t pulse:0.2.3 backend/
+#   docker save pulse:0.2.3 | sudo k3s ctr images import -
 #
 # Building on the Mac (arm64) needs --platform linux/amd64.
 
-FROM golang:1.26.8-alpine AS build
+FROM golang:1.26.10-alpine AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
